@@ -1,2 +1,2 @@
 # DS_S1
-Este repositorio es del primer semestre del máster.
+Este repositorio contiene todos los trabajos realizados en el máster.
