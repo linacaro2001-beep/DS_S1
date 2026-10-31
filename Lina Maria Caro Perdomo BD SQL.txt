@@ -1,0 +1,111 @@
+
+--1. Definimos el CONTEXTO
+USE WAREHOUSE animal_task_wh;
+USE ROLE training_role;
+USE DATABASE UCM;
+USE SCHEMA SMART_DESK;
+
+SELECT * FROM ACCOUNTS;
+SELECT * FROM FORECASTS;
+SELECT * FROM SALES;
+
+--CONSULTAS
+
+--1. Análisis de Ventas y Beneficio por Categoría de Producto
+SELECT CATEGORY AS "Categoría", SUM(MAINTENANCE) AS "Mantenimiento", SUM(PRODUCT) AS "Producto", SUM(PARTS) AS "Partes", SUM(SUPPORT) AS "Soporte", SUM(TOTAL) AS "Total Ventas", ROUND(SUM(UNITS_SOLD)) AS "Unidades Vendidas", SUM(PROFIT) AS "Beneficio Total"
+FROM SALES
+WHERE ACCOUNT = 'Adabs Entertainment'AND YEAR=2020
+GROUP BY CATEGORY;
+
+--2. Comparación de Rendimiento por País en Regiones APAC y EMEA
+SELECT A.REGION AS "Región", A.COUNTRY AS "País", ROUND(AVG(S.TOTAL),2) AS "Ingreso promedio", ROUND(AVG(S.UNITS_SOLD)) AS "Unidades Vendidas Promedio", ROUND(AVG(S.PROFIT),2) AS "Beneficio promedio"
+FROM ACCOUNTS AS A INNER JOIN SALES AS S
+ON S.ACCOUNT=A.ACCOUNT
+WHERE A.REGION IN('APAC','EMEA')
+GROUP BY A.REGION, A.COUNTRY
+ORDER BY "Ingreso promedio" DESC;
+
+--3 Análisis del Beneficio Total por Industria: Estudio de Clientes en Etapa de Compromiso 
+
+--3.1. Forecast mayores a 500000-SUBQUERY
+SELECT F.ACCOUNT, F.FORECAST
+FROM FORECASTS AS F
+WHERE F.PREDICTION_CATEGORY = 'Commit'
+AND F.FORECAST > 500000;
+
+--3.2.QUERY PRINCIPAL: industrias que generan mayor beneficio entre las cuentas en etapa commit y tienen un forecast mayor a 500000. Clasificando como 'Alto' a los beneficios totales que superan el 1000000 o 'Normal' en caso contrario.
+SELECT A.INDUSTRY AS "INDUSTRIA", SUM(S.PROFIT) AS "BENEFICIO TOTAL",
+CASE
+    WHEN SUM(S.PROFIT) > 1000000 THEN 'Alto'
+    ELSE 'Normal'
+END AS "CATEGORÍA SEGÚN BENEFICIO"
+FROM ACCOUNTS AS A INNER JOIN SALES AS S
+ON A.ACCOUNT=S.ACCOUNT
+WHERE S.ACCOUNT IN (SELECT F.ACCOUNT
+                    FROM FORECASTS AS F
+                    WHERE F.PREDICTION_CATEGORY = 'Commit'
+                    AND F.FORECAST > 500000)
+GROUP BY A.INDUSTRY
+ORDER BY "BENEFICIO TOTAL" DESC;
+
+--4. Evolución del Pronóstico y Beneficio Real: Análisis de la Trayectoria por Categoría. 
+SELECT COALESCE (F.CATEGORY, S.CATEGORY) AS "CATEGORÍA", SUM(S.PROFIT) AS "BENEFICIO TOTAL 2021", SUM(F.FORECAST) AS "PRONOSTICO TOTAL 2022", MIN(F.OPPORTUNITY_AGE) AS "OPORTUNIDAD MÁS RECIENTE", MAX(F.OPPORTUNITY_AGE) AS "OPORTUNIDAD MÁS ANTIGUA"
+FROM FORECASTS AS F FULL OUTER JOIN SALES AS S
+ON F.CATEGORY=S.CATEGORY AND S.YEAR=2021 AND F.YEAR=2022
+GROUP BY COALESCE (F.CATEGORY, S.CATEGORY)
+ORDER BY "PRONOSTICO TOTAL 2022" DESC;
+
+
+--CASO PRÁCTICO: Crecimiento por Región
+
+--Análisis exploratorio: Sales y Accounts
+SELECT COUNT(*) AS Num_Filas, COUNT(DISTINCT Account) AS Num_Cuentas, MIN(Year) AS "Primer_Año", MAX(Year) AS "Último_Año", SUM(TOTAL) AS Ventas_Totales, SUM(PROFIT) AS Beneficio_Total, ROUND(SUM(UNITS_SOLD)) AS Unidades_Totales
+FROM SALES;
+
+SELECT SUM(PRODUCT) AS Ventas_Productos, SUM(MAINTENANCE) AS S_Mantenimiento, SUM(SUPPORT) AS S_Soporte, SUM(PARTS) AS S_Partes
+FROM SALES;
+
+SELECT COUNT(DISTINCT Account) AS Num_cuentas, COUNT(DISTINCT Region) AS Num_regiones, COUNT(DISTINCT Country) AS Num_paises, COUNT(DISTINCT Industry) AS Num_industrias
+FROM ACCOUNTS;
+
+--1. Vista que resume las ventas, beneficios y unidades por región y año
+CREATE OR REPLACE VIEW Vista_Rendimiento_Regional AS
+SELECT A.REGION, S.YEAR, SUM(S.TOTAL) AS Ventas_Totales, SUM(S.PROFIT) AS Beneficio_Total, SUM(S.UNITS_SOLD) AS Unidades_Vendidas
+FROM SALES AS S JOIN ACCOUNTS AS A
+ON S.ACCOUNT = A.ACCOUNT
+GROUP BY A.REGION, S.YEAR;
+
+-- Evolución por región
+SELECT *
+FROM "Vista_Rendimiento_Regional"
+WHERE YEAR IN (2020, 2021)
+ORDER BY REGION, Ventas_Totales DESC;
+
+--2. Crecimiento interanual 
+SELECT V21.Region, V20.Ventas_Totales AS Ventas_2020, V21.Ventas_Totales AS Ventas_2021, ROUND(((V21.Ventas_Totales - V20.Ventas_Totales) / V20.Ventas_Totales) * 100, 2) AS Crecimiento_Ventas_Porcentual, V20.Beneficio_Total AS Beneficio_2020, V21.Beneficio_Total AS Beneficio_2021, ROUND(((V21.Beneficio_Total -V20.Beneficio_Total) / V20.Beneficio_Total) * 100, 2) AS Crecimiento_Beneficio_Porcentual
+FROM Vista_Rendimiento_Regional AS V20
+INNER JOIN Vista_Rendimiento_Regional AS V21 
+ON V20.REGION = V21.REGION
+WHERE V20.YEAR = 2020 AND V21.YEAR = 2021
+ORDER BY Crecimiento_Ventas_Porcentual DESC;
+
+--3.Análisis de productos y servicios por región y año
+SELECT A.REGION, S.YEAR, SUM(S.PRODUCT) AS Ventas_Productos, SUM(S.MAINTENANCE + S.SUPPORT + S.PARTS) AS Ventas_Servicios, SUM(S.TOTAL) AS Ventas_Totales
+FROM SALES AS S JOIN ACCOUNTS AS A
+ON S.ACCOUNT = A.ACCOUNT
+WHERE S.YEAR IN (2020, 2021)
+GROUP BY A.REGION, S.YEAR
+ORDER BY A.REGION, S.YEAR;
+
+--4. Crecimiento interanual de las ventas de productos y servicios
+WITH Categorias_Ingresos AS (
+        SELECT A.REGION, S.YEAR, SUM(S.PRODUCT) AS Ventas_Productos, SUM(S.MAINTENANCE + S.SUPPORT + S.PARTS) AS Ventas_Servicios, SUM(S.TOTAL) AS Ventas_Totales
+        FROM SALES AS S JOIN ACCOUNTS AS A
+        ON S.ACCOUNT = A.ACCOUNT
+        WHERE S.YEAR IN (2020, 2021)
+        GROUP BY A.REGION, S.YEAR
+        ORDER BY A.REGION, S.YEAR)
+SELECT C21.REGION, C20.Ventas_Productos AS Productos_2020, C21.Ventas_Productos AS Productos_2021, ROUND(((C21.Ventas_Productos - C20.Ventas_Productos)/C20.Ventas_Productos)*100,2) AS Crecimiento_Productos, C20.Ventas_Servicios AS Servicios_2020, C21.Ventas_Servicios AS Servicios_2021, ROUND(((C21.Ventas_Servicios - C20.Ventas_Servicios)/C20.Ventas_Servicios)*100,2) AS Crecimiento_Servicios
+FROM Categorias_Ingresos AS C20 JOIN Categorias_Ingresos AS C21
+ON C20.REGION = C21.REGION
+WHERE C20.YEAR = 2020 AND C21.YEAR = 2021;
